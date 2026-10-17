@@ -101,6 +101,11 @@ jobs:
           nix develop path:. -c sbomnix ./result-app --buildtime --cdx reports/sbom.buildtime.cdx.json --spdx reports/sbom.buildtime.spdx.json --csv reports/sbom.buildtime.csv
           nix develop path:. -c syft "file:dist/app-x86_64-linux" -o cyclonedx-json=reports/sbom.analyzed.cdx.json -o spdx-json=reports/sbom.analyzed.spdx.json
           nix develop path:. -c provenance ./result-app --recursive --out reports/provenance.nix.slsa.json
+          jq '.predicate
+              | .runDetails.metadata |= with_entries(select(.value != ""))
+              | .runDetails.builder  |= with_entries(select(.value != "" and .value != {} and .value != []))' \
+            reports/provenance.nix.slsa.json > reports/provenance.nix.predicate.json
+          jq -r '"Nix provenance: \(.buildDefinition.resolvedDependencies | length) resolved dependencies"' reports/provenance.nix.predicate.json
           for f in runtime buildtime analyzed; do
             printf '%-10s %s components\n' "$f" "$(jq '.components | length' "reports/sbom.$f.cdx.json")"
           done | tee reports/sbom-counts.txt
@@ -167,7 +172,7 @@ jobs:
         with:
           subject-path: dist/app-x86_64-linux
           predicate-type: https://slsa.dev/provenance/v1
-          predicate-path: reports/provenance.nix.slsa.json
+          predicate-path: reports/provenance.nix.predicate.json
 
       - name: Bundles
         if: inputs.attest
