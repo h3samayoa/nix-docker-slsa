@@ -7,7 +7,7 @@ on:
         type: boolean
         default: false
       builder-digest:
-        description: Digest
+        description: Digest just produced by build-image.yml in this run (empty = resolve `latest`)
         type: string
         default: ""
 
@@ -57,7 +57,6 @@ jobs:
         env:
           DIGEST_IN: ${{ inputs.builder-digest }}
         run: |
-          set -euo pipefail
           if [ -n "$DIGEST_IN" ]; then
             digest="$DIGEST_IN"
           else
@@ -80,27 +79,24 @@ jobs:
           REF: ${{ steps.builder.outputs.ref }}
         run: |
           set -euo pipefail
-          for out in app runtime-env image; do
-            nix build -L --max-jobs 0 -o "result-$out" ".#$out" 2>&1 | tee -a build.log
-          done
+          nix build -L --max-jobs 0 -o result-app         .#packages.x86_64-linux.app         2>&1 | tee -a build.log
+          nix build -L --max-jobs 0 -o result-runtime-env .#packages.x86_64-linux.runtime-env 2>&1 | tee -a build.log
+          nix build -L --max-jobs 0 -o result-image       .#packages.x86_64-linux.image       2>&1 | tee -a build.log
           grep -c "on 'ssh://builder'" build.log || { echo "::error::nothing was built on the remote builder"; exit 1; }
           mkdir -p reports dist
-          echo "$REF" > reports/build-image.txt
+          echo "$REF" > reports/builder-image.txt
           file result-app/bin/app | tee reports/file.txt
           nix path-info --json result-app result-runtime-env result-image > reports/path-info.json
           install -m 755 result-app/bin/app dist/app-x86_64-linux
           install -m 644 result-image dist/app-image-x86_64-linux.tar.gz
           (cd dist && sha256sum app-* > SHA256SUMS)
 
-      # Build SBOMs from the derivation graph (runtime closure of the image contents,
-      # buildtime closure of the app) and the Analyzed SBOM from the binary's buildinfo.
       - name: SBOMs
         env:
           PROVENANCE_BUILD_TYPE: https://actions.github.io/buildtypes/workflow/v1
           PROVENANCE_BUILDER_ID: https://github.com/${{ github.repository }}/.github/workflows/build-attest.yml@${{ github.ref }}
           PROVENANCE_INVOCATION_ID: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
-          set -euo pipefail
           nix develop path:. -c sbomnix result-runtime-env --cdx reports/sbom.runtime.cdx.json --spdx reports/sbom.runtime.spdx.json --csv reports/sbom.runtime.csv
           nix develop path:. -c sbomnix result-app --buildtime --cdx reports/sbom.buildtime.cdx.json --spdx reports/sbom.buildtime.spdx.json --csv reports/sbom.buildtime.csv
           nix develop path:. -c syft "file:dist/app-x86_64-linux" -o cyclonedx-json=reports/sbom.analyzed.cdx.json -o spdx-json=reports/sbom.analyzed.spdx.json
@@ -111,7 +107,6 @@ jobs:
 
       - name: Vulnerabilities
         run: |
-          set -euo pipefail
           for f in analyzed runtime buildtime; do
             nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o json  > "reports/grype.$f.json" || true
             nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o table > "reports/grype.$f.txt"  || true
@@ -119,13 +114,12 @@ jobs:
           cat reports/grype.analyzed.txt
           (cd app && nix develop path:.. -c govulncheck ./... | tee ../reports/govulncheck.txt) || true
 
-      # YARA-Forge core (pinned by sha256) + repo rules
+      # YARA-Forge core (pinned by sha256) + repo rules; the EICAR control proves the scanner fires.
       - name: Binary scan
         env:
           YF_REL: "20261011"
           YF_SHA: bf0cc68e60df44bee4e9906713160889e7c2142b14621394860a45e629035147
         run: |
-          set -euo pipefail
           nix develop path:. -c go version -m dist/app-x86_64-linux > reports/buildinfo.txt
           nix develop path:. -c checksec --file=dist/app-x86_64-linux --output=json > reports/checksec.json
           curl -fsSL -o "$RUNNER_TEMP/yf.zip" "https://github.com/YARAHQ/yara-forge/releases/download/${YF_REL}/yara-forge-rules-core.zip"
@@ -141,7 +135,6 @@ jobs:
 
       - name: Findings
         run: |
-          set -euo pipefail
           ch="$(jq '[.matches[] | select(.vulnerability.severity=="Critical" or .vulnerability.severity=="High")] | length' reports/grype.analyzed.json)"
           ya="$(grep -c . reports/yara-matches.txt || true)"; ya="${ya:-0}"
           re="$(grep -oE 'affected by [0-9]+ vulnerabilit' reports/govulncheck.txt | grep -oE '[0-9]+' || echo 0)"

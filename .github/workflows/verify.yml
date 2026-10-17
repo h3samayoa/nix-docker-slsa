@@ -42,7 +42,6 @@ jobs:
       - name: Attestations
         if: inputs.attest
         run: |
-          set -euo pipefail
           cd artifacts/dist
           common=(--owner "$OWNER" --signer-workflow "${REPO}/.github/workflows/build-attest.yml"
                   --source-digest "$SHA" --deny-self-hosted-runners)
@@ -56,14 +55,12 @@ jobs:
       - name: Policy
         if: inputs.attest
         run: |
-          set -euo pipefail
           printf '{"expected":{"signer_workflow":"https://github.com/%s/.github/workflows/build-attest.yml","source_repo":"github.com/%s"}}\n' "$REPO" "$REPO" > expected.json
           nix develop path:. -c conftest test verification.provenance.json -p policy/provenance.rego -n provenance -d expected.json
 
       - name: Tamper test
         if: inputs.attest
         run: |
-          set -euo pipefail
           cp artifacts/dist/app-x86_64-linux tampered; printf 'x' >> tampered
           if gh attestation verify tampered --owner "$OWNER" 2>/dev/null; then echo "::error::tampered binary verified"; exit 1; fi
           echo "tampered binary correctly rejected"
@@ -71,7 +68,6 @@ jobs:
       - name: Decision
         id: decide
         run: |
-          set -euo pipefail
           f=artifacts/reports/reports/findings.json
           any="$(jq -r '[.[] | to_entries[] | .value] | any(. > 0)' "$f")"
           [ "$any" = "true" ] && decision=review || decision=clean

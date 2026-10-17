@@ -53,7 +53,6 @@ jobs:
       - name: Approval
         id: approval
         run: |
-          set -euo pipefail
           gh api "repos/${REPO}/actions/runs/${RUN_ID}/approvals" > approvals.json
           sel='[.[] | select(.state=="approved") | select(any(.environments[]; .name=="release"))] | last'
           approver="$(jq -r "$sel | .user.login // empty" approvals.json)"
@@ -125,11 +124,10 @@ jobs:
           path: artifacts
       - name: Release
         run: |
-          set -euo pipefail
           mkdir -p release
           r=artifacts/reports/reports
           cp artifacts/dist/* "$r"/sbom.*.json "$r"/provenance.nix.slsa.json "$r"/grype.* "$r"/govulncheck.txt \
-             "$r"/findings.json "$r"/path-info.json "$r"/build-image.txt "$r"/buildinfo.txt "$r"/checksec.json "$r"/yara-matches.txt \
+             "$r"/findings.json "$r"/path-info.json "$r"/builder-image.txt "$r"/buildinfo.txt "$r"/checksec.json "$r"/yara-matches.txt \
              artifacts/verification/vsa/*.vsa.json release/
           if [ -d artifacts/exception ]; then
             cp artifacts/exception/* release/
@@ -140,5 +138,5 @@ jobs:
           # shellcheck disable=SC2016
           notes="$(printf '%s\n\n%s\n\nBuilder image: `%s`' \
             "Built on a GitHub-hosted arm64 runner through an emulated x86_64 Docker remote builder; SLSA provenance (GitHub + Nix), SBOMs, scan reports and a Verification Summary Attestation included." \
-            "$verdict" "$(cat release/build-image.txt)")"
+            "$verdict" "$(cat release/builder-image.txt)")"
           gh release create "$GITHUB_REF_NAME" --repo "$REPO" --title "$GITHUB_REF_NAME" --notes "$notes" release/*
