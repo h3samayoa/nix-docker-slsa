@@ -1,0 +1,6 @@
+result
+result-*
+.builder/
+reports/
+*.sigstore.json
+.direnv/
