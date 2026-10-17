@@ -1,0 +1,37 @@
+name: diag-qemu
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  grid:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Grid
+        run: |
+          qemus=(
+            "qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
+            "qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6"
+            "qemu-v8.1.5@sha256:2d2918e86e5327d0661f7083d67a95280b0f7be8f77ed79a8418f81d7d90ce6f"
+            "qemu-v7.0.0@sha256:66e11bea77a5ea9d6f0fe79b57cd2b189b5d15b93a2bdb925be22949232e4e55"
+          )
+          images=(nixos/nix:2.35.3-amd64 nixos/nix:2.31.6-amd64 nixos/nix:2.28.8-amd64)
+          for img in "${images[@]}"; do docker pull --platform linux/amd64 -q "$img" >/dev/null; done
+          printf '%-14s %-24s %-8s %s\n' QEMU IMAGE RESULT OUTPUT | tee grid.txt
+          for q in "${qemus[@]}"; do
+            tag="${q%%@*}"
+            docker run --privileged --rm "tonistiigi/binfmt:$q" --uninstall qemu-x86_64 >/dev/null 2>&1 || true
+            docker run --privileged --rm "tonistiigi/binfmt:$q" --install amd64 >/dev/null 2>&1
+            for img in "${images[@]}"; do
+              out="$(docker run --rm --platform linux/amd64 "$img" nix-store --version 2>&1 | tail -1)" && r=OK || r=FAIL
+              printf '%-14s %-24s %-8s %s\n' "$tag" "${img#nixos/nix:}" "$r" "$out" | tee -a grid.txt
+            done
+            # same, with a conservative CPU model instead of QEMU's default "max"
+            out="$(docker run --rm --platform linux/amd64 -e QEMU_CPU=qemu64 "${images[0]}" nix-store --version 2>&1 | tail -1)" && r=OK || r=FAIL
+            printf '%-14s %-24s %-8s %s\n' "$tag" "2.35.3 QEMU_CPU=qemu64" "$r" "$out" | tee -a grid.txt
+          done
+          { echo '```'; cat grid.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
