@@ -48,15 +48,15 @@ jobs:
         run: |
           rebuild=false
           if [ "$EVENT" = push ]; then
-            if ! git diff --quiet HEAD~1 HEAD -- builder/ .github/workflows/builder-image.yml 2>/dev/null \
+            if ! git diff --quiet HEAD~1 HEAD -- builder/ .github/workflows/build-image.yml 2>/dev/null \
                || ! docker buildx imagetools inspect "${IMAGE}:latest" >/dev/null 2>&1; then rebuild=true; fi
           fi
           echo "rebuild=$rebuild" | tee -a "$GITHUB_OUTPUT"
 
-  builder-image:
+  build-image:
     needs: changes
     if: needs.changes.outputs.rebuild == 'true'
-    uses: $/.github/workflows/builder-image.yml
+    uses: $/.github/workflows/build-image.yml
     permissions:
       contents: read
       packages: write
@@ -64,8 +64,8 @@ jobs:
       attestations: write
 
   build:
-    needs: [hygiene, changes, builder-image]
-    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.changes.result == 'success' && (needs.builder-image.result == 'success' || needs.builder-image.result == 'skipped') }}
+    needs: [hygiene, changes, build-image]
+    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.changes.result == 'success' && (needs.build-image.result == 'success' || needs.build-image.result == 'skipped') }}
     uses: $/.github/workflows/build-attest.yml
     permissions:
       contents: read
@@ -74,7 +74,7 @@ jobs:
       attestations: write
     with:
       attest: ${{ github.ref == 'refs/heads/main' }}
-      builder-digest: ${{ needs.builder-image.outputs.digest }}
+      builder-digest: ${{ needs.build-image.outputs.digest }}
 
   verify:
     needs: build

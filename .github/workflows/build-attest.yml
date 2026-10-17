@@ -7,7 +7,7 @@ on:
         type: boolean
         default: false
       builder-digest:
-        description: Digest just produced by builder-image.yml in this run (empty = resolve `latest`)
+        description: Digest
         type: string
         default: ""
 
@@ -51,7 +51,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Only a builder image attested by builder-image.yml on a hosted runner is accepted.
+      # Only a builder image attested by build-image.yml on a hosted runner is accepted.
       - name: Builder image
         id: builder
         env:
@@ -66,7 +66,7 @@ jobs:
           fi
           ref="${BUILDER}@${digest}"
           gh attestation verify "oci://${ref}" --owner "$OWNER" \
-            --signer-workflow "${REPO}/.github/workflows/builder-image.yml" --deny-self-hosted-runners
+            --signer-workflow "${REPO}/.github/workflows/build-image.yml" --deny-self-hosted-runners
           echo "ref=${ref}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Start builder
@@ -85,7 +85,7 @@ jobs:
           done
           grep -c "on 'ssh://builder'" build.log || { echo "::error::nothing was built on the remote builder"; exit 1; }
           mkdir -p reports dist
-          echo "$REF" > reports/builder-image.txt
+          echo "$REF" > reports/build-image.txt
           file result-app/bin/app | tee reports/file.txt
           nix path-info --json result-app result-runtime-env result-image > reports/path-info.json
           install -m 755 result-app/bin/app dist/app-x86_64-linux
