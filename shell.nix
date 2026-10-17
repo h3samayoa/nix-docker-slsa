@@ -12,9 +12,7 @@
   zizmor,
   pinact,
   actionlint,
-  trufflehog,
   hadolint,
-  ssh-audit,
   gh,
   jq,
   checksec,
@@ -32,9 +30,7 @@ mkShellNoCC {
     zizmor
     pinact
     actionlint
-    trufflehog
     hadolint
-    ssh-audit
     gh
     jq
   ]
