@@ -1,0 +1,144 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  build:
+    uses: $/.github/workflows/build-attest.yml
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      attestations: write
+    with:
+      attest: true
+
+  verify:
+    needs: build
+    uses: $/.github/workflows/verify.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      attest: true
+
+  review:
+    needs: verify
+    if: needs.verify.outputs.decision == 'review'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+
+      - name: Approval
+        id: approval
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/approvals" > approvals.json
+          sel='[.[] | select(.state=="approved") | select(any(.environments[]; .name=="release"))] | last'
+          approver="$(jq -r "$sel | .user.login // empty" approvals.json)"
+          comment="$(jq -r "$sel | .comment // empty" approvals.json)"
+          [ -n "$approver" ] || { echo "::error::no approval for environment 'release'"; exit 1; }
+          [ -n "$comment" ]  || { echo "::error::approval by $approver has no comment; a reason is required"; exit 1; }
+          echo "approver=$approver" >> "$GITHUB_OUTPUT"
+          printf 'comment<<EOF\n%s\nEOF\n' "$comment" >> "$GITHUB_OUTPUT"
+
+      - name: OpenVEX
+        env:
+          APPROVER: ${{ steps.approval.outputs.approver }}
+          COMMENT: ${{ steps.approval.outputs.comment }}
+        run: |
+          set -euo pipefail
+          mkdir -p exception
+          sha="$(sha256sum artifacts/dist/app-x86_64-linux | cut -d' ' -f1)"
+          bash .github/scripts/openvex.sh artifacts/reports/reports/grype.analyzed.json \
+            "pkg:generic/app-x86_64-linux?checksum=sha256:${sha}" "$APPROVER" "$COMMENT" \
+            "https://github.com/${REPO}/vex/${RUN_ID}" | tee exception/app.openvex.json
+
+      - id: attest-vex
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: artifacts/dist/app-x86_64-linux
+          predicate-type: https://openvex.dev/ns/v0.2.0
+          predicate-path: exception/app.openvex.json
+
+      - name: Exception VSA
+        env:
+          VEX_BUNDLE: ${{ steps.attest-vex.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$VEX_BUNDLE" exception/app.openvex.sigstore.json
+          d=artifacts/dist
+          bash .github/scripts/vsa.sh PASSED app-x86_64-linux \
+            "https://github.com/${REPO}/.github/workflows/release.yml" "https://github.com/${REPO}/tree/${SHA}/policy" \
+            "$d/app.provenance.sigstore.json" "$d/app.sbom.sigstore.json" exception/app.openvex.sigstore.json \
+            | tee exception/app-x86_64-linux.vsa.exception.json
+
+      - id: attest-vsa
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: artifacts/dist/app-x86_64-linux
+          predicate-type: https://slsa.dev/verification_summary/v1
+          predicate-path: exception/app-x86_64-linux.vsa.exception.json
+
+      - env:
+          VSA_BUNDLE: ${{ steps.attest-vsa.outputs.bundle-path }}
+        run: cp "$VSA_BUNDLE" exception/app.vsa.exception.sigstore.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: exception
+          path: exception/
+
+  publish:
+    needs: [verify, review]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.decision == 'clean' || needs.review.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+      - name: Release
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          r=artifacts/reports/reports
+          cp artifacts/dist/* "$r"/sbom.*.json "$r"/provenance.nix.slsa.json "$r"/grype.* "$r"/govulncheck.txt \
+             "$r"/findings.json "$r"/path-info.json "$r"/builder-image.txt "$r"/buildinfo.txt "$r"/checksec.json "$r"/yara-matches.txt \
+             artifacts/verification/vsa/*.vsa.json release/
+          if [ -d artifacts/exception ]; then
+            cp artifacts/exception/* release/
+            verdict="Verification: **PASSED by exception** — findings accepted by a reviewer; see \`app.openvex.json\` and \`app-x86_64-linux.vsa.exception.json\`."
+          else
+            verdict="Verification: **PASSED** — no security findings."
+          fi
+          # shellcheck disable=SC2016
+          notes="$(printf '%s\n\n%s\n\nBuilder image: `%s`' \
+            "Built on a GitHub-hosted arm64 runner through an emulated x86_64 Docker remote builder; SLSA provenance (GitHub + Nix), SBOMs, scan reports and a Verification Summary Attestation included." \
+            "$verdict" "$(cat release/builder-image.txt)")"
+          gh release create "$GITHUB_REF_NAME" --repo "$REPO" --title "$GITHUB_REF_NAME" --notes "$notes" release/*

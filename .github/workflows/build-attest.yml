@@ -1,0 +1,202 @@
+name: build-attest
+
+on:
+  workflow_call:
+    inputs:
+      attest:
+        type: boolean
+        default: false
+      builder-digest:
+        description: Digest just produced by builder-image.yml in this run (empty = resolve `latest`)
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      attestations: write
+    env:
+      BUILDER: ghcr.io/${{ github.repository }}/builder
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: amd64
+
+      # nix-daemon runs as root and does the SSH itself; the builder spec
+      # allows one derivation at a time in the container.
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          extra-conf: |
+            trusted-users = root runner
+            builders = ssh://builder x86_64-linux - 1 1 big-parallel
+            builders-use-substitutes = true
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only a builder image attested by builder-image.yml on a hosted runner is accepted.
+      - name: Builder image
+        id: builder
+        env:
+          DIGEST_IN: ${{ inputs.builder-digest }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DIGEST_IN" ]; then
+            digest="$DIGEST_IN"
+          else
+            digest="$(docker buildx imagetools inspect "${BUILDER}:latest" --format '{{.Manifest.Digest}}')" \
+              || { echo "::error::no builder image at ${BUILDER}:latest (built by the first push that contains builder/)"; exit 1; }
+          fi
+          ref="${BUILDER}@${digest}"
+          gh attestation verify "oci://${ref}" --owner "$OWNER" \
+            --signer-workflow "${REPO}/.github/workflows/builder-image.yml" --deny-self-hosted-runners
+          echo "ref=${ref}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Start builder
+        env:
+          REF: ${{ steps.builder.outputs.ref }}
+        run: bash .github/scripts/start-builder.sh "$REF"
+
+      # --max-jobs 0: the runner builds nothing; every derivation must be logged on ssh://builder.
+      - name: Build
+        env:
+          REF: ${{ steps.builder.outputs.ref }}
+        run: |
+          set -euo pipefail
+          for out in app runtime-env image; do
+            nix build -L --max-jobs 0 -o "result-$out" ".#$out" 2>&1 | tee -a build.log
+          done
+          grep -c "on 'ssh://builder'" build.log || { echo "::error::nothing was built on the remote builder"; exit 1; }
+          mkdir -p reports dist
+          echo "$REF" > reports/builder-image.txt
+          file result-app/bin/app | tee reports/file.txt
+          nix path-info --json result-app result-runtime-env result-image > reports/path-info.json
+          install -m 755 result-app/bin/app dist/app-x86_64-linux
+          install -m 644 result-image dist/app-image-x86_64-linux.tar.gz
+          (cd dist && sha256sum app-* > SHA256SUMS)
+
+      # Build SBOMs from the derivation graph (runtime closure of the image contents,
+      # buildtime closure of the app) and the Analyzed SBOM from the binary's buildinfo.
+      - name: SBOMs
+        env:
+          PROVENANCE_BUILD_TYPE: https://actions.github.io/buildtypes/workflow/v1
+          PROVENANCE_BUILDER_ID: https://github.com/${{ github.repository }}/.github/workflows/build-attest.yml@${{ github.ref }}
+          PROVENANCE_INVOCATION_ID: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          nix develop path:. -c sbomnix result-runtime-env --cdx reports/sbom.runtime.cdx.json --spdx reports/sbom.runtime.spdx.json --csv reports/sbom.runtime.csv
+          nix develop path:. -c sbomnix result-app --buildtime --cdx reports/sbom.buildtime.cdx.json --spdx reports/sbom.buildtime.spdx.json --csv reports/sbom.buildtime.csv
+          nix develop path:. -c syft "file:dist/app-x86_64-linux" -o cyclonedx-json=reports/sbom.analyzed.cdx.json -o spdx-json=reports/sbom.analyzed.spdx.json
+          nix develop path:. -c provenance result-app --recursive --out reports/provenance.nix.slsa.json
+          for f in runtime buildtime analyzed; do
+            printf '%-10s %s components\n' "$f" "$(jq '.components | length' "reports/sbom.$f.cdx.json")"
+          done | tee reports/sbom-counts.txt
+
+      - name: Vulnerabilities
+        run: |
+          set -euo pipefail
+          for f in analyzed runtime buildtime; do
+            nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o json  > "reports/grype.$f.json" || true
+            nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o table > "reports/grype.$f.txt"  || true
+          done
+          cat reports/grype.analyzed.txt
+          (cd app && nix develop path:.. -c govulncheck ./... | tee ../reports/govulncheck.txt) || true
+
+      # YARA-Forge core (pinned by sha256) + repo rules
+      - name: Binary scan
+        env:
+          YF_REL: "20261011"
+          YF_SHA: bf0cc68e60df44bee4e9906713160889e7c2142b14621394860a45e629035147
+        run: |
+          set -euo pipefail
+          nix develop path:. -c go version -m dist/app-x86_64-linux > reports/buildinfo.txt
+          nix develop path:. -c checksec --file=dist/app-x86_64-linux --output=json > reports/checksec.json
+          curl -fsSL -o "$RUNNER_TEMP/yf.zip" "https://github.com/YARAHQ/yara-forge/releases/download/${YF_REL}/yara-forge-rules-core.zip"
+          echo "${YF_SHA}  $RUNNER_TEMP/yf.zip" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/rules"; unzip -q -o "$RUNNER_TEMP/yf.zip" -d "$RUNNER_TEMP/rules"; cp yara/*.yar "$RUNNER_TEMP/rules/"
+          # shellcheck disable=SC2016
+          printf '%s%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$' 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > "$RUNNER_TEMP/eicar.txt"
+          nix develop path:. -c yr scan yara/eicar.yar "$RUNNER_TEMP/eicar.txt" | grep -q EICAR_Test_File \
+            || { echo "::error::YARA positive control did not fire"; exit 1; }
+          nix develop path:. -c yr scan --disable-console-logs --ignore-invalid-rules "$RUNNER_TEMP/rules" dist/app-x86_64-linux \
+            > reports/yara-matches.txt 2>/dev/null || true
+          cat reports/yara-matches.txt
+
+      - name: Findings
+        run: |
+          set -euo pipefail
+          ch="$(jq '[.matches[] | select(.vulnerability.severity=="Critical" or .vulnerability.severity=="High")] | length' reports/grype.analyzed.json)"
+          ya="$(grep -c . reports/yara-matches.txt || true)"; ya="${ya:-0}"
+          re="$(grep -oE 'affected by [0-9]+ vulnerabilit' reports/govulncheck.txt | grep -oE '[0-9]+' || echo 0)"
+          jq -n --argjson ch "$ch" --argjson ya "$ya" --argjson re "$re" \
+            '{"app-x86_64-linux": {critical_high: $ch, yara_matches: $ya, reachable_vulns: $re}}' | tee reports/findings.json
+          { echo "### security findings"; echo; echo '```'; cat reports/findings.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest provenance
+        if: inputs.attest
+        id: attest-bin
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/app-x86_64-linux
+            dist/app-image-x86_64-linux.tar.gz
+            dist/SHA256SUMS
+
+      - name: Attest SBOM
+        if: inputs.attest
+        id: attest-sbom
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: dist/app-x86_64-linux
+          sbom-path: reports/sbom.analyzed.cdx.json
+
+      - name: Attest Nix provenance
+        if: inputs.attest
+        id: attest-nix
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/app-x86_64-linux
+          predicate-type: https://slsa.dev/provenance/v1
+          predicate-path: reports/provenance.nix.slsa.json
+
+      - name: Bundles
+        if: inputs.attest
+        env:
+          B_BIN: ${{ steps.attest-bin.outputs.bundle-path }}
+          B_SBOM: ${{ steps.attest-sbom.outputs.bundle-path }}
+          B_NIX: ${{ steps.attest-nix.outputs.bundle-path }}
+        run: |
+          cp "$B_BIN" dist/app.provenance.sigstore.json
+          cp "$B_SBOM" dist/app.sbom.sigstore.json
+          cp "$B_NIX" dist/app.nix-provenance.sigstore.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reports
+          path: |
+            reports/
+            build.log
+
+      - if: always()
+        run: docker stop builder || true

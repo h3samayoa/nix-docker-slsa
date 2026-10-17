@@ -1,0 +1,87 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - run: nix develop path:. -c zizmor --offline --min-severity medium .github/
+      - run: nix develop path:. -c actionlint -ignore 'specifying action "\$/' -ignore 'reusable workflow call "\$/'
+      - run: nix develop path:. -c hadolint builder/Dockerfile
+      - run: nix develop path:. -c shellcheck .github/scripts/*.sh builder/entrypoint.sh
+      - run: nix flake show --all-systems path:. >/dev/null
+      - run: nix fmt -- --check ./*.nix
+
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      rebuild: ${{ steps.decide.outputs.rebuild }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          IMAGE: ghcr.io/${{ github.repository }}/builder
+        run: |
+          rebuild=false
+          if [ "$EVENT" = push ]; then
+            if ! git diff --quiet HEAD~1 HEAD -- builder/ .github/workflows/builder-image.yml 2>/dev/null \
+               || ! docker buildx imagetools inspect "${IMAGE}:latest" >/dev/null 2>&1; then rebuild=true; fi
+          fi
+          echo "rebuild=$rebuild" | tee -a "$GITHUB_OUTPUT"
+
+  builder-image:
+    needs: changes
+    if: needs.changes.outputs.rebuild == 'true'
+    uses: $/.github/workflows/builder-image.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+  build:
+    needs: [hygiene, changes, builder-image]
+    if: ${{ !cancelled() && needs.hygiene.result == 'success' && needs.changes.result == 'success' && (needs.builder-image.result == 'success' || needs.builder-image.result == 'skipped') }}
+    uses: $/.github/workflows/build-attest.yml
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      attestations: write
+    with:
+      attest: ${{ github.ref == 'refs/heads/main' }}
+      builder-digest: ${{ needs.builder-image.outputs.digest }}
+
+  verify:
+    needs: build
+    uses: $/.github/workflows/verify.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      attest: ${{ github.ref == 'refs/heads/main' }}
