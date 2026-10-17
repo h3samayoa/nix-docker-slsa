@@ -35,11 +35,3 @@ Host builder
   StrictHostKeyChecking yes
 EOF
 sudo chmod 600 /root/.ssh/config /root/.ssh/known_hosts
-
-# test
-echo "--- builder smoke test"
-docker exec builder uname -m || true
-docker exec builder /root/.nix-profile/bin/nix-store --version || echo "nix-store via docker exec: FAILED ($?)"
-sudo -H ssh -F /root/.ssh/config builder 'echo ssh-ok; echo "PATH=$PATH"' || echo "ssh plain command: FAILED ($?)"
-sudo -H ssh -F /root/.ssh/config builder 'nix-store --version' || echo "nix-store via ssh: FAILED ($?)"
-sudo -H ssh -F /root/.ssh/config builder 'nix-store --serve --write </dev/null' || echo "nix-store --serve via ssh: FAILED ($?)"
