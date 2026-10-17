@@ -20,7 +20,7 @@ let
     ];
   };
 in
-dockerTools.buildLayeredImage { # testing
+dockerTools.buildLayeredImage {
   name = "app";
   tag = rev;
   contents = [ runtime-env ];
