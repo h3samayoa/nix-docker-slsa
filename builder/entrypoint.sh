@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # ephemeral host keys are generated at container start
 set -euo pipefail
 
