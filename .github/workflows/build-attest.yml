@@ -121,7 +121,7 @@ jobs:
           YF_SHA: bf0cc68e60df44bee4e9906713160889e7c2142b14621394860a45e629035147
         run: |
           nix develop path:. -c go version -m dist/app-x86_64-linux > reports/buildinfo.txt
-          nix develop path:. -c checksec --file=dist/app-x86_64-linux --output=json > reports/checksec.json
+          nix develop path:. -c checksec --no-banner file dist/app-x86_64-linux -o json > reports/checksec.json
           curl -fsSL -o "$RUNNER_TEMP/yf.zip" "https://github.com/YARAHQ/yara-forge/releases/download/${YF_REL}/yara-forge-rules-core.zip"
           echo "${YF_SHA}  $RUNNER_TEMP/yf.zip" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/rules"; unzip -q -o "$RUNNER_TEMP/yf.zip" -d "$RUNNER_TEMP/rules"; cp yara/*.yar "$RUNNER_TEMP/rules/"
