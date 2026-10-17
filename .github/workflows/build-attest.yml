@@ -86,7 +86,7 @@ jobs:
           mkdir -p reports dist
           echo "$REF" > reports/builder-image.txt
           file result-app/bin/app | tee reports/file.txt
-          nix path-info --json result-app result-runtime-env result-image > reports/path-info.json
+          nix path-info --json ./result-app ./result-runtime-env ./result-image > reports/path-info.json
           install -m 755 result-app/bin/app dist/app-x86_64-linux
           install -m 644 result-image dist/app-image-x86_64-linux.tar.gz
           (cd dist && sha256sum app-* > SHA256SUMS)
@@ -97,10 +97,10 @@ jobs:
           PROVENANCE_BUILDER_ID: https://github.com/${{ github.repository }}/.github/workflows/build-attest.yml@${{ github.ref }}
           PROVENANCE_INVOCATION_ID: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
-          nix develop path:. -c sbomnix result-runtime-env --cdx reports/sbom.runtime.cdx.json --spdx reports/sbom.runtime.spdx.json --csv reports/sbom.runtime.csv
-          nix develop path:. -c sbomnix result-app --buildtime --cdx reports/sbom.buildtime.cdx.json --spdx reports/sbom.buildtime.spdx.json --csv reports/sbom.buildtime.csv
+          nix develop path:. -c sbomnix ./result-runtime-env --cdx reports/sbom.runtime.cdx.json --spdx reports/sbom.runtime.spdx.json --csv reports/sbom.runtime.csv
+          nix develop path:. -c sbomnix ./result-app --buildtime --cdx reports/sbom.buildtime.cdx.json --spdx reports/sbom.buildtime.spdx.json --csv reports/sbom.buildtime.csv
           nix develop path:. -c syft "file:dist/app-x86_64-linux" -o cyclonedx-json=reports/sbom.analyzed.cdx.json -o spdx-json=reports/sbom.analyzed.spdx.json
-          nix develop path:. -c provenance result-app --recursive --out reports/provenance.nix.slsa.json
+          nix develop path:. -c provenance ./result-app --recursive --out reports/provenance.nix.slsa.json
           for f in runtime buildtime analyzed; do
             printf '%-10s %s components\n' "$f" "$(jq '.components | length' "reports/sbom.$f.cdx.json")"
           done | tee reports/sbom-counts.txt
