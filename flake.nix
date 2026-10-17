@@ -1,11 +1,17 @@
 {
   description = "nix-docker-slsa";
 
-  # nixos-unstable-small for go 1.26.9
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/f0b687e10c0c5b2f199ca57127071ef922c0f92d";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/55bfb4d7437bd4e09ab7cba58a43bd68eb310044";
+    nixpkgs-go.url = "github:NixOS/nixpkgs/f0b687e10c0c5b2f199ca57127071ef922c0f92d";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      nixpkgs-go,
+    }:
     let
       target = "x86_64-linux";
       supportedSystems = [
@@ -16,12 +22,15 @@
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
 
       rev = self.rev or self.dirtyRev or "dirty";
+      goFor = system: nixpkgs-go.legacyPackages.${system}.go;
     in
     {
       packages.${target} =
         let
           pkgs = nixpkgs.legacyPackages.${target};
-          app = pkgs.callPackage ./default.nix { };
+          app = pkgs.callPackage ./default.nix {
+            buildGoModule = pkgs.buildGoModule.override { go = goFor target; };
+          };
           image = pkgs.callPackage ./image.nix { inherit app rev; };
         in
         {
@@ -31,7 +40,7 @@
         };
 
       devShells = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.callPackage ./shell.nix { };
+        default = nixpkgs.legacyPackages.${system}.callPackage ./shell.nix { go = goFor system; };
       });
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
