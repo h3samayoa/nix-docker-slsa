@@ -1,7 +1,8 @@
 {
   description = "nix-docker-slsa";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/55bfb4d7437bd4e09ab7cba58a43bd68eb310044";
+  # nixos-unstable-small for go 1.26.9
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/f0b687e10c0c5b2f199ca57127071ef922c0f92d";
 
   outputs =
     { self, nixpkgs }:
