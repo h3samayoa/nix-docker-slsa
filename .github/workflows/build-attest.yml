@@ -7,7 +7,7 @@ on:
         type: boolean
         default: false
       builder-digest:
-        description: Digest just produced by build-image.yml in this run (empty = resolve `latest`)
+        description: Digest
         type: string
         default: ""
 
@@ -112,12 +112,14 @@ jobs:
 
       - name: Vulnerabilities
         run: |
+          set -euo pipefail
           for f in analyzed runtime buildtime; do
-            nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o json  > "reports/grype.$f.json" || true
-            nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o table > "reports/grype.$f.txt"  || true
+            nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o json  > "reports/grype.$f.json"
+            nix develop path:. -c grype "sbom:reports/sbom.$f.cdx.json" -o table > "reports/grype.$f.txt"
           done
+          nix develop path:. -c grype db status | tee reports/grype-db.txt
           cat reports/grype.analyzed.txt
-          (cd app && nix develop path:.. -c govulncheck ./... | tee ../reports/govulncheck.txt) || true
+          (cd app && nix develop path:.. -c govulncheck ./... | tee ../reports/govulncheck.txt) || [ $? -eq 3 ]
 
       - name: Binary scan
         env:
@@ -134,12 +136,14 @@ jobs:
           nix develop path:. -c yr scan yara/eicar.yar "$RUNNER_TEMP/eicar.txt" | grep -q EICAR_Test_File \
             || { echo "::error::YARA positive control did not fire"; exit 1; }
           nix develop path:. -c yr scan --disable-console-logs --ignore-invalid-rules "$RUNNER_TEMP/rules" dist/app-x86_64-linux \
-            > reports/yara-matches.txt 2>/dev/null || true
+            > reports/yara-matches.txt
           cat reports/yara-matches.txt
 
       - name: Findings
         run: |
-          ch="$(jq -n '[inputs.matches[] | select(.vulnerability.severity=="Critical" or .vulnerability.severity=="High")] | length' reports/grype.analyzed.json reports/grype.runtime.json)"
+          nix develop path:. -c conftest test reports/grype.analyzed.json reports/grype.runtime.json \
+            -p policy/vulns.rego -n vulns -o json > reports/policy.vulns.json || [ $? -eq 1 ]
+          ch="$(jq '[.[].failures // [] | .[]] | length' reports/policy.vulns.json)"
           ya="$(grep -c . reports/yara-matches.txt || true)"; ya="${ya:-0}"
           re="$(grep -oE 'affected by [0-9]+ vulnerabilit' reports/govulncheck.txt | grep -oE '[0-9]+' || echo 0)"
           jq -n --argjson ch "$ch" --argjson ya "$ya" --argjson re "$re" \

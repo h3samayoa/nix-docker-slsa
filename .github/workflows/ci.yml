@@ -78,6 +78,17 @@ jobs:
     with:
       attest: ${{ github.ref == 'refs/heads/main' }}
 
+  security:
+    needs: verify
+    if: ${{ !cancelled() && needs.verify.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      DECISION: ${{ needs.verify.outputs.decision }}
+    steps:
+      - run: |
+          [ "$DECISION" = clean ] || { echo "::error::security findings: merge blocked; release requires reviewer approval"; exit 1; }
+
   comment:
     needs: verify
     if: ${{ github.event_name == 'pull_request' && !cancelled() && needs.verify.result == 'success' }}
@@ -98,6 +109,7 @@ jobs:
           remote="$(grep -c "on 'ssh://builder'" build.log || true)"
           {
             echo "### verify → **${DECISION}**"
+            [ "$DECISION" = clean ] || echo "Merge is blocked by the \`security\` check. A release from this commit requires a reviewer's approval with a reason (\`release\` environment)."
             echo
             echo "| | |"
             echo "|---|---|"
