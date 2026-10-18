@@ -70,7 +70,9 @@ jobs:
           set -euo pipefail
           mkdir -p exception
           sha="$(sha256sum artifacts/dist/app-x86_64-linux | cut -d' ' -f1)"
-          bash .github/scripts/openvex.sh artifacts/reports/reports/grype.analyzed.json \
+          jq -n '{matches: [inputs.matches[]]}' artifacts/reports/reports/grype.analyzed.json artifacts/reports/reports/grype.runtime.json \
+            > "$RUNNER_TEMP/grype.shipped.json"
+          bash .github/scripts/openvex.sh "$RUNNER_TEMP/grype.shipped.json" \
             "pkg:generic/app-x86_64-linux?checksum=sha256:${sha}" "$APPROVER" "$COMMENT" \
             "https://github.com/${REPO}/vex/${RUN_ID}" | tee exception/app.openvex.json
 

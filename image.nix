@@ -4,7 +4,6 @@
   dockerTools,
   cacert,
   tzdata,
-  curl,
   app,
   rev,
 }:
@@ -16,7 +15,6 @@ let
       app
       cacert
       tzdata
-      curl
     ];
   };
 in

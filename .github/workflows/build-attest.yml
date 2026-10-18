@@ -119,7 +119,6 @@ jobs:
           cat reports/grype.analyzed.txt
           (cd app && nix develop path:.. -c govulncheck ./... | tee ../reports/govulncheck.txt) || true
 
-      # YARA-Forge core (pinned by sha256) + repo rules; the EICAR control proves the scanner fires.
       - name: Binary scan
         env:
           YF_REL: "20261011"
@@ -140,7 +139,7 @@ jobs:
 
       - name: Findings
         run: |
-          ch="$(jq '[.matches[] | select(.vulnerability.severity=="Critical" or .vulnerability.severity=="High")] | length' reports/grype.analyzed.json)"
+          ch="$(jq -n '[inputs.matches[] | select(.vulnerability.severity=="Critical" or .vulnerability.severity=="High")] | length' reports/grype.analyzed.json reports/grype.runtime.json)"
           ya="$(grep -c . reports/yara-matches.txt || true)"; ya="${ya:-0}"
           re="$(grep -oE 'affected by [0-9]+ vulnerabilit' reports/govulncheck.txt | grep -oE '[0-9]+' || echo 0)"
           jq -n --argjson ch "$ch" --argjson ya "$ya" --argjson re "$re" \
@@ -171,7 +170,6 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/app-x86_64-linux
-          # SLSA v1-shaped predicate describing the Nix build graph.
           predicate-type: https://github.com/${{ github.repository }}/nix-provenance/v1
           predicate-path: reports/provenance.nix.predicate.json
 
