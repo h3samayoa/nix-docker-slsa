@@ -89,8 +89,9 @@ jobs:
         run: |
           set -euo pipefail
           cp "$VEX_BUNDLE" exception/app.openvex.sigstore.json
+          sha="$(sha256sum artifacts/dist/app-x86_64-linux | cut -d' ' -f1)"
           d=artifacts/dist
-          bash .github/scripts/vsa.sh PASSED app-x86_64-linux \
+          VSA_POLICY_COMMIT="$SHA" bash .github/scripts/vsa.sh PASSED "pkg:generic/app-x86_64-linux?checksum=sha256:${sha}" \
             "https://github.com/${REPO}/.github/workflows/release.yml" "https://github.com/${REPO}/tree/${SHA}/policy" \
             "$d/app.provenance.sigstore.json" "$d/app.sbom.sigstore.json" exception/app.openvex.sigstore.json \
             | tee exception/app-x86_64-linux.vsa.exception.json
@@ -129,7 +130,7 @@ jobs:
           mkdir -p release
           r=artifacts/reports/reports
           cp artifacts/dist/* "$r"/sbom.*.json "$r"/provenance.nix.slsa.json "$r"/provenance.nix.predicate.json "$r"/grype.* "$r"/govulncheck.txt \
-             "$r"/findings.json "$r"/path-info.json "$r"/builder-image.txt "$r"/buildinfo.txt "$r"/checksec.json "$r"/yara-matches.txt \
+             "$r"/findings.json "$r"/policy.vulns.json "$r"/grype-db.txt "$r"/path-info.json "$r"/builder-image.txt "$r"/buildinfo.txt "$r"/checksec.json "$r"/yara-matches.txt \
              artifacts/verification/vsa/*.vsa.json release/
           for f in release/*; do [ -s "$f" ] || echo "(no output)" > "$f"; done
           if [ -d artifacts/exception ]; then

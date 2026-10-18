@@ -81,7 +81,8 @@ jobs:
           set -euo pipefail
           mkdir -p vsa; d=artifacts/dist
           [ "$DECISION" = clean ] && result=PASSED || result=FAILED
-          bash .github/scripts/vsa.sh "$result" app-x86_64-linux \
+          uri="pkg:generic/app-x86_64-linux?checksum=sha256:$(sha256sum "$d/app-x86_64-linux" | cut -d' ' -f1)"
+          VSA_POLICY_COMMIT="$SHA" bash .github/scripts/vsa.sh "$result" "$uri" \
             "https://github.com/${REPO}/.github/workflows/verify.yml" "https://github.com/${REPO}/tree/${SHA}/policy" \
             "$d/app.provenance.sigstore.json" "$d/app.nix-provenance.sigstore.json" "$d/app.sbom.sigstore.json" \
             | tee vsa/app-x86_64-linux.vsa.json

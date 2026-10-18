@@ -19,13 +19,14 @@ jq -n \
   --arg time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg resource "$resource" \
   --arg policy "$policy" \
+  --arg pcommit "${VSA_POLICY_COMMIT:-}" \
   --arg result "$result" \
   --argjson inputs "$inputs" \
   '{
      verifier: { id: $verifier },
      timeVerified: $time,
      resourceUri: $resource,
-     policy: { uri: $policy },
+     policy: ({ uri: $policy } + (if $pcommit != "" then { digest: { gitCommit: $pcommit } } else {} end)),
      inputAttestations: $inputs,
      verificationResult: $result,
      verifiedLevels: (if $result == "PASSED" and ($inputs | length) > 0 then ["SLSA_BUILD_LEVEL_3"] else [] end),

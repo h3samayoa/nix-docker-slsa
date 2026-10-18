@@ -22,6 +22,7 @@ dockerTools.buildLayeredImage {
   contents = [ runtime-env ];
   config = {
     Cmd = [ (lib.getExe app) ];
+    User = "10001:10001";
     ExposedPorts."8080/tcp" = { };
     Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
     Labels = {
