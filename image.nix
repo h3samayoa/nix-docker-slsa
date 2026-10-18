@@ -3,7 +3,6 @@
   buildEnv,
   dockerTools,
   cacert,
-  tzdata,
   app,
   rev,
 }:
@@ -14,7 +13,6 @@ let
     paths = [
       app
       cacert
-      tzdata
     ];
   };
 in
