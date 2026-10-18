@@ -12,6 +12,7 @@
   zizmor,
   pinact,
   actionlint,
+  shellcheck,
   hadolint,
   gh,
   jq,
@@ -30,6 +31,7 @@ mkShellNoCC {
     zizmor
     pinact
     actionlint
+    shellcheck
     hadolint
     gh
     jq
