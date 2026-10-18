@@ -108,7 +108,7 @@ jobs:
             echo "| SBOMs | $(awk '{printf "%s %s · ", $1, $2}' reports/sbom-counts.txt | sed 's/ · $//') components |"
             echo
             echo '```json'; cat reports/findings.json; echo '```'
-            for r in grype.analyzed govulncheck yara-matches; do
+            for r in grype.analyzed grype.runtime govulncheck yara-matches; do
               echo "<details><summary>${r}</summary>"; echo; echo '```'; cat "reports/${r}.txt"; echo '```'; echo "</details>"
             done
             echo "<details><summary>checksec</summary>"; echo; echo '```json'; cat reports/checksec.json; echo '```'; echo "</details>"
