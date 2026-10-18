@@ -129,6 +129,7 @@ jobs:
           cp artifacts/dist/* "$r"/sbom.*.json "$r"/provenance.nix.slsa.json "$r"/provenance.nix.predicate.json "$r"/grype.* "$r"/govulncheck.txt \
              "$r"/findings.json "$r"/path-info.json "$r"/builder-image.txt "$r"/buildinfo.txt "$r"/checksec.json "$r"/yara-matches.txt \
              artifacts/verification/vsa/*.vsa.json release/
+          for f in release/*; do [ -s "$f" ] || echo "(no output)" > "$f"; done
           if [ -d artifacts/exception ]; then
             cp artifacts/exception/* release/
             verdict="Verification: **PASSED by exception** — findings accepted by a reviewer; see \`app.openvex.json\` and \`app-x86_64-linux.vsa.exception.json\`."
