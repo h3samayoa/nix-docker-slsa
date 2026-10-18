@@ -69,6 +69,7 @@ jobs:
 
   verify:
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     uses: $/.github/workflows/verify.yml
     permissions:
       contents: read
