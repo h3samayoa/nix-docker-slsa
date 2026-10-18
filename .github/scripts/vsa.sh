@@ -28,6 +28,6 @@ jq -n \
      policy: { uri: $policy },
      inputAttestations: $inputs,
      verificationResult: $result,
-     verifiedLevels: (if $result == "PASSED" then ["SLSA_BUILD_LEVEL_3"] else [] end),
+     verifiedLevels: (if $result == "PASSED" and ($inputs | length) > 0 then ["SLSA_BUILD_LEVEL_3"] else [] end),
      slsaVersion: "1.2"
    }'
