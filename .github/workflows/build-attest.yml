@@ -101,9 +101,9 @@ jobs:
           nix develop path:. -c sbomnix ./result-app --buildtime --cdx reports/sbom.buildtime.cdx.json --spdx reports/sbom.buildtime.spdx.json --csv reports/sbom.buildtime.csv
           nix develop path:. -c syft "file:dist/app-x86_64-linux" -o cyclonedx-json=reports/sbom.analyzed.cdx.json -o spdx-json=reports/sbom.analyzed.spdx.json
           nix develop path:. -c provenance ./result-app --recursive --out reports/provenance.nix.slsa.json
-          jq '.predicate
-              | .runDetails.metadata |= with_entries(select(.value != ""))
-              | .runDetails.builder  |= with_entries(select(.value != "" and .value != {} and .value != []))' \
+          # sbomnix writes a full in-toto Statement; actions/attest takes the bare predicate.
+          # Empty startedOn/finishedOn are dropped: "" is not a valid SLSA timestamp.
+          jq '.predicate | .runDetails.metadata |= with_entries(select(.value != ""))' \
             reports/provenance.nix.slsa.json > reports/provenance.nix.predicate.json
           jq -r '"Nix provenance: \(.buildDefinition.resolvedDependencies | length) resolved dependencies"' reports/provenance.nix.predicate.json
           for f in runtime buildtime analyzed; do
@@ -171,7 +171,8 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/app-x86_64-linux
-          predicate-type: https://slsa.dev/provenance/v1
+          # SLSA v1-shaped predicate describing the Nix build graph.
+          predicate-type: https://github.com/${{ github.repository }}/nix-provenance/v1
           predicate-path: reports/provenance.nix.predicate.json
 
       - name: Bundles
