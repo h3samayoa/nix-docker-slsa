@@ -35,6 +35,9 @@ jobs:
         with:
           path: artifacts
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+          diagnostic-endpoint: ""
 
       - name: Checksums
         run: cd artifacts/dist && sha256sum -c SHA256SUMS
