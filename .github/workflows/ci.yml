@@ -21,6 +21,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          determinate: false
+          diagnostic-endpoint: ""
       - run: nix develop path:. -c zizmor --offline --min-severity medium .github/
       - run: nix develop path:. -c actionlint -ignore 'specifying action "\$/' -ignore 'reusable workflow call "\$/'
       - run: nix develop path:. -c hadolint builder/Dockerfile
