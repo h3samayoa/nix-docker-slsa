@@ -1,5 +1,5 @@
 # 2.35.x images segfault under qemu-user
-FROM nixos/nix:2.31.6-amd64@sha256:36560fe476cf070464be20850b0fbb00da3e4b3973fdda0abf47b8dd08afe025
+FROM nixos/nix:2.35.6-amd64@sha256:a3b3e3eb3883e5af5327757c5304c0093426a0d11c58a9056df46cfefe30319e
 
 RUN set -eux; \
     { \
